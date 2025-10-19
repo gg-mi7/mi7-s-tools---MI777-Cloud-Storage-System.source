@@ -2,6 +2,11 @@ import os
 import sys
 import json
 import requests
+import warnings
+import urllib3
+
+# Disable SSL verification warnings since we're using ngrok
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from pathlib import Path
 import tempfile
 import threading
@@ -144,19 +149,48 @@ class FileChangeHandler:
     def _upload_file(self, p: Path):
         try:
             rel = str(p.relative_to(self.sync_folder)).replace('\\', '/')
-            for attempt in range(3):
+            file_size = p.stat().st_size
+            
+            for attempt in range(5):  # Increased retry attempts
                 try:
                     with open(p, 'rb') as f:
-                        resp = requests.post(f"{self.server_url}/upload/{rel}", files={'file': f})
+                        # Use chunked upload for large files
+                        if file_size > 1024 * 1024:  # If file is larger than 1MB
+                            print(f"Uploading large file {rel} ({file_size/1024/1024:.1f} MB)...")
+                        
+                        # Configure the request with longer timeout and SSL verification disabled
+                        resp = requests.post(
+                            f"{self.server_url}/upload/{rel}",
+                            files={'file': f},
+                            timeout=300,  # 5 minute timeout
+                            verify=False,  # Disable SSL verification for ngrok
+                            stream=True    # Enable streaming
+                        )
+                        
                         if resp.status_code == 200:
                             print(f"Synchronized: {rel}")
                             return
+                        else:
+                            print(f"Upload failed with status {resp.status_code}: {resp.text}")
+                            
                 except (PermissionError, FileNotFoundError):
-                    time.sleep(0.5)
+                    print(f"Retrying {rel} due to file access error (attempt {attempt + 1}/5)...")
+                    time.sleep(1)
+                    continue
+                except requests.exceptions.SSLError as e:
+                    print(f"SSL Error uploading {rel} (attempt {attempt + 1}/5): {e}")
+                    time.sleep(2)
+                    continue
+                except requests.exceptions.RequestException as e:
+                    print(f"Network error uploading {rel} (attempt {attempt + 1}/5): {e}")
+                    time.sleep(2)
                     continue
                 except Exception as e:
                     print(f"Upload error {rel}: {e}")
-                    break
+                    time.sleep(2)
+                    continue
+                    
+            print(f"Failed to upload {rel} after 5 attempts")
         except Exception as e:
             print(f"Error uploading file {p}: {e}")
 
@@ -179,25 +213,10 @@ class CloudStorageClient:
         self._setup_context_menu()
 
     def _get_server_url(self) -> str:
-        """Get server URL from local file or fall back to localhost"""
-        try:
-            # Try to read ngrok URL from file
-            with open("ngrok_url.json") as f:
-                data = json.load(f)
-                url = data['url']
-                timestamp = data['timestamp']
-                
-                # Check if URL is not too old (5 minutes)
-                if time.time() - timestamp < 300:
-                    print(f"Using ngrok URL: {url}")
-                    return url
-
-        except Exception as e:
-            print(f"Note: Could not read ngrok URL ({e})")
-
-        # Fallback to localhost
-        print("Using localhost URL")
-        return "http://localhost:8000"
+        """Get server URL"""
+        server_url = "https://inconvenient-rhonda-taperingly.ngrok-free.dev"
+        print(f"Using server URL: {server_url}")
+        return server_url
 
     def _get_available_drive_letter(self):
         """Find the first available drive letter"""
@@ -493,7 +512,7 @@ class CloudStorageClient:
         except Exception as e:
             print(f"Error during synchronization: {e}")
 
-def main(server_url: str = "http://localhost:8000", sync_path: str = None):
+def main(server_url: str = "https://inconvenient-rhonda-taperingly.ngrok-free.dev", sync_path: str = None):
     try:
         client = CloudStorageClient(server_url)
         if sync_path:
@@ -514,7 +533,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Cloud Storage System Client")
-    parser.add_argument('--server', default="http://localhost:8000", help="Server URL")
+    parser.add_argument('--server', default="https://inconvenient-rhonda-taperingly.ngrok-free.dev", help="Server URL")
     parser.add_argument('--sync', help="Path to synchronize")
     
     args = parser.parse_args()

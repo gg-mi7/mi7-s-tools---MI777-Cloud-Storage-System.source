@@ -22,7 +22,7 @@ if not NGROK_AUTH_TOKEN:
 
 # Configure server settings
 SERVER_HOST = os.getenv('SERVER_HOST', '0.0.0.0')
-SERVER_PORT = int(os.getenv('SERVER_PORT', '8000'))
+SERVER_PORT = int(os.getenv('SERVER_PORT', '3169'))  # Default to port 3169
 
 app = FastAPI(title="Cloud Storage System")
 
@@ -148,12 +148,31 @@ async def server_status():
             "error": str(e)
         }
 
+def find_available_port(start_port: int = 3169, max_tries: int = 10):
+    """Find an available port starting from start_port"""
+    import socket
+    for port in range(start_port, start_port + max_tries):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('0.0.0.0', port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(f"Could not find an available port in range {start_port}-{start_port + max_tries}")
+
 if __name__ == "__main__":
     try:
         print("\nStarting Cloud Storage System Server")
         print("=================================")
         print(f"Loading configuration from .env file")
         print(f"Server host: {SERVER_HOST}")
+        
+        # Find available port
+        port = find_available_port(SERVER_PORT)
+        if port != SERVER_PORT:
+            print(f"Port {SERVER_PORT} is in use, using port {port} instead")
+        SERVER_PORT = port
+        
         print(f"Server port: {SERVER_PORT}")
         print(f"Storage directory: {STORAGE_DIR}")
         print(f"Ngrok token: {'Configured' if NGROK_AUTH_TOKEN else 'Missing'}\n")
