@@ -1,4 +1,6 @@
 import os
+import sys
+import json
 import requests
 from pathlib import Path
 import tempfile
@@ -167,12 +169,35 @@ class FileChangeHandler:
             print(f"Error deleting {rel}: {e}")
 
 class CloudStorageClient:
-    def __init__(self, server_url: str = "http://localhost:8000"):
+    def __init__(self, server_url: str = None):
+        if server_url is None:
+            server_url = self._get_server_url()
         self.server_url = server_url.rstrip('/')
         self._setup_virtual_drive()
         # initialize watchfiles-based handler
         self.event_handler = FileChangeHandler(self.sync_folder, server_url)
         self._setup_context_menu()
+
+    def _get_server_url(self) -> str:
+        """Get server URL from local file or fall back to localhost"""
+        try:
+            # Try to read ngrok URL from file
+            with open("ngrok_url.json") as f:
+                data = json.load(f)
+                url = data['url']
+                timestamp = data['timestamp']
+                
+                # Check if URL is not too old (5 minutes)
+                if time.time() - timestamp < 300:
+                    print(f"Using ngrok URL: {url}")
+                    return url
+
+        except Exception as e:
+            print(f"Note: Could not read ngrok URL ({e})")
+
+        # Fallback to localhost
+        print("Using localhost URL")
+        return "http://localhost:8000"
 
     def _get_available_drive_letter(self):
         """Find the first available drive letter"""
